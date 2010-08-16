@@ -1,0 +1,6 @@
+Blazentoo is an Adobe AIR application that can be used to exploit insecure 
+Adobe BlazeDS and LiveCycle Data Services ES servers. Blazentoo provides the 
+ability to seamlessly browse web content, abusing insecurely configured Proxy 
+Services. More information can be found on the GDS Blog.
+
+http://www.gdssecurity.com/l/b/2010/03/17/penetrating-intranets-through-adobe-flex-applications/
