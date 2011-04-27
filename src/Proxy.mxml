@@ -4,377 +4,420 @@
 # (C) 2010 - Marcin Wielgoszewski (Gotham Digital Science)
 #
 -->
-<mx:WindowedApplication	
-	xmlns:mx="http://www.adobe.com/2006/mxml" 
-	xmlns:arc="com.arc90.flexlib.containers.*"
-	layout="absolute" 
-	minWidth="1024"	
-	minHeight="768"	
-	title="Gotham Digital Science Labs"
-	status="{windowStatus}"
-	creationComplete="initApp()">	
-	<mx:TraceTarget includeCategory="true" includeLevel="true" includeTime="true"/>
-	<mx:Script>
-		<![CDATA[
-			import mx.messaging.*;
-			import mx.messaging.channels.*;
-			import mx.rpc.events.*;
-			import mx.rpc.AbstractOperation;
-			import mx.rpc.soap.Operation;
-			import mx.rpc.soap.WebService;
-			import mx.controls.Alert;
-			import mx.logging.Log;
-			import mx.logging.ILogger;
-			import mx.utils.URLUtil;
-			
-			private static const log:ILogger = Log.getLogger("Blazentoo");
-			
-			[Bindable]
-			private var proxyTypes:Array = ["HTTP", "SOAP"];
-			
-			[Bindable]
-			private var msgTypes:Array = ["AMF", "AMFX"];
-			
-			[Bindable]
-			private var methodTypes:Array = ["DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT", "TRACE"];  
-			
-			[Bindable]
-			private var browser_url:String = ""; 
-			
-			[Bindable]
-			private var windowStatus:String = "";
-			
-			[Bindable]
-			public var soap:WebService = new WebService();
-			
-			public var so:SharedObject;
-			
-			private function goToURL(address:String):void {
-				browser_url = address;
-				
-				if (useProxy.selected) {
-				
-					switch (proxyType.text) {
-						case "HTTP":
-							http.url = browser_url;
-							http.method = httpMethod.text;
-							break;
-						
-						case "SOAP":
-							soap.endpointURI = browser_url;
-							break;
-						
-					}
-					
-					log.info("Attempting to get " + browser_url);
-					windowStatus = "Loading " + browser_url;
-					
-					switch (proxyType.text) {
-						case "HTTP":
-							http.send();
-							break;
-						
-						case "SOAP":
-							var nop:Boolean = false;
-							
-							if (action.text == "" || action.text == null) {
-								log.debug("Setting SOAPAction to ''");
-								nop = true;
-								var noOperation:mx.rpc.soap.Operation = new mx.rpc.soap.Operation(soap);
-							} else {
-								log.debug("Setting SOAPAction to " + action.text);
-								var operation:mx.rpc.AbstractOperation = soap.getOperation(action.text);
-							}
-							
-							if (nop) {
-								noOperation.send();
-							} else {
-								operation.send();
-							}
-							break;
-					}
-					
-				}
-				
-				else {
-					browser.location = browser_url;
-				}
-			}
-			
-			
-			private function saveSettings(endpointUrl:String, destinationId:String, channelId:String):void {
-				// Set up our channel set
-				var channelSet:ChannelSet = new ChannelSet();
-				
-				switch (msgType.text) {
-					case "AMF":
-						if (URLUtil.isHttpsURL(endpointUrl)) {
-							channelSet.addChannel(new SecureAMFChannel(channelId, endpointUrl));
-						} else { 
-							channelSet.addChannel(new AMFChannel(channelId, endpointUrl));
-						}
-						break;
-					
-					case "AMFX":
-						if (URLUtil.isHttpsURL(endpointUrl)) {
-							channelSet.addChannel(new SecureHTTPChannel(channelId, endpointUrl));
-						} else {
-							channelSet.addChannel(new HTTPChannel(channelId, endpointUrl));
-						}
-						break;
-				}
-				
-				switch (proxyType.text) {
-					case "HTTP":
-						http.destination = destinationId;
-						http.channelSet = channelSet;
-						break;
-					
-					case "SOAP":
-						soap.destination = destinationId;
-						soap.channelSet = channelSet;
-						
-						if (wsdl.text != null || wsdl.text != "") {
-							soap.wsdl = wsdl.text;
-						}
-						
-						soap.addEventListener("fault", handleFault);
-						soap.addEventListener("result", handleHTTPResponse);
-						
-						soap.loadWSDL();
-						
-						break;
-				}
-				
-				// Uncomment the following to enable saving text input to LSO
-				/*
-				so = SharedObject.getLocal("settings");
-				
-				so.data.endpoint = endpointUrl;
-				so.data.destination = destinationId;
-				so.data.channelId = channelId;
-				so.data.wsdl = wsdl.text;
-				so.data.action = action.text;
-				so.data.proxyType  = proxyType.selectedIndex;
-				so.data.msgType = msgType.selectedIndex;
-				so.data.httpMethod = httpMethod.selectedIndex;
-				*/
-				
-				windowStatus = "Proxy settings saved. Ready...";
-				log.info("Proxy settings saved");
-				log.debug("   endpoint    = " + endpointUrl);
-				log.debug("   destination = " + destinationId);
-				log.debug("   channel id  = " + channelId);
-				log.debug("   soap action = " + action.text);
-				log.debug("   proxy type  = " + proxyType.text);
-				log.debug("   format      = " + msgType.text);
-				log.debug(" Ready...");
-				
-				addressbar.setFocus();
-			}
-			
-			
-			private function switchProxy():void {
-				if (useProxy.selected) {
-					log.debug("Using proxy");
-					browser.removeEventListener(Event.COMPLETE, updateBrowserUrlAndSource);
-					browser.addEventListener(Event.LOCATION_CHANGE, clickHandler);
-					proxyType.text == "HTTP" ? httpMethod.enabled = true: httpMethod.enabled = false;
-				} else {
-					log.debug("Not using proxy");
-					browser.removeEventListener(Event.LOCATION_CHANGE, clickHandler);
-					browser.addEventListener(Event.COMPLETE, updateBrowserUrlAndSource);
-					action.enabled = false;
-					httpMethod.enabled = false;
-				}
-			}
-			
-			
-			private function updateBrowserUrlAndSource(event:Event):void {
-				addressbar.text = browser.location;
-				//sourcetab.text = browser.data.toString();
-			}
-			
-			
-			private function clickHandler(event:Event):void {
-				log.debug(event.currentTarget.id + ": " + event.eventPhase);  
-				if (useProxy.selected) {
-					var tmp_url:String = event.target.location.toString();
-					
-					if (tmp_url.charAt(0) == "/") {
-						http.url = URLUtil.getFullURL(browser_url, tmp_url);
-					} 
-					
-					else if (tmp_url.substr(0, 7) == "http://" || tmp_url.substr(0, 8) == "https://") {
-						http.url = URLUtil.getFullURL(browser_url, tmp_url);
-					} 
-					
-					else {
-						http.url = browser_url.substr(0, browser_url.lastIndexOf("/")) + "/" + tmp_url;
-					} 
-					
-					if (http.url.indexOf("about:blank") == -1) {
-						log.info("Attempting to get " + http.url);
-						windowStatus = "Loading " + http.url;
-						http.send();
-					}
-				} 
-			}
-			
-			
-			public function handleHTTPResponse(event:ResultEvent):void {
-				log.debug(event.message.toString());
-				var response:String = event.message.body.toString();
-				sourcetab.text = response;
-				browser.data = response;
-				browser_url = http.url;
-			}
-			
-			public function handleSOAPResponse(event:FaultEvent):void {
-				log.debug(event.message.toString());
-				var response:String = event.message.body.toString();
-				browser.data = response;
-				sourcetab.text = response;
-				browser_url = soap.endpointURI;
-				
-			}
-			
-			public function handleFault(event:FaultEvent):void {
-				var error:String = "";
-				
-				if (event.fault.faultDetail != event.fault.faultString) {
-					error = event.fault.faultCode + ": " + event.fault.faultString + "(" + event.fault.faultDetail + ")";
-				}
-				else {
-					error = event.fault.faultCode + ": " + event.fault.faultString;
-				}
-				
-				log.error("[" + event.target + "] " + event.fault.toString());
-				
-				// If this is a SOAP, we still probably want to load the results into 
-				// the browser, since a normal web page is not going to be valid xml.
-				if (proxyType.text == "SOAP") {
-                    switch (event.fault.faultCode) {
-                        case "Client.NoSuchMethod":  	  	 
-                            Alert.show(event.fault.faultString.toString(), "No such method");  	  	 
-                            break;
-                        case "Client.WSDL":
-                            Alert.show(event.fault.faultString.toString(), "No WSDL defined");
-                            break;
-                        case "Server.Proxy.Request.Failed":  	  	 
-                            Alert.show(event.fault.faultString.toString() +". "+ event.fault.faultDetail.toString(), "Unable to load WSDL");  	  	 
-                            break;  	  	 
-                        default:
-                            handleSOAPResponse(event);  	  	 
-                    }
-				} else {
-					Alert.show(error);
-				}
-			}
-			
-			public function initApp():void {
-				log.info("(C) 2010 - Marcin Wielgoszewski (Gotham Digital Science)");
-				log.info("GDS BlazeDS Proxy Tool initialized");
-				
-				// Uncomment the following to enable loading text input from LSO
-				/*
-				so = SharedObject.getLocal("settings");
-				
-				endpoint.text = so.data.endpoint; 
-				destination.text = so.data.destination;
-				channel.text = so.data.channel;
-				wsdl.text = so.data.wsdl;
-				action.text = so.data.action;
-				
-				so.data.proxyType  != null ? proxyType.selectedIndex  = so.data.proxyType  : proxyType.selectedIndex  = 0; 
-				so.data.msgType    != null ? msgType.selectedIndex    = so.data.msgType    : msgType.selectedIndex    = 0;
-				so.data.httpMethod != null ? httpMethod.selectedIndex = so.data.httpMethod : httpMethod.selectedIndex = 4;
-				
-				saveSettings(endpoint.text, destination.text, channel.text);
-				*/
-				
-				browser.data = "";
-				switchProxy();
-				
-			}
-			
-		]]>
-	</mx:Script>
-	
-	<mx:HTTPService
-		id="http"
-		useProxy="true"
-		resultFormat="text"
-		result="handleHTTPResponse(event)"
-		fault="handleFault(event)"
-		/>
-	
-	<mx:TitleWindow x="0" y="0" width="100%" height="100%" layout="absolute" title="BlazeDS Proxy Browser">
+<mx:WindowedApplication
+  xmlns:mx="http://www.adobe.com/2006/mxml"
+  xmlns:arc="com.arc90.flexlib.containers.*"
+  layout="absolute"
+  minWidth="1024"
+  minHeight="768"
+  title="Gotham Digital Science Labs"
+  status="{windowStatus}"
+  creationComplete="initApp()">
+  <mx:TraceTarget includeCategory="true" includeLevel="true" includeTime="true"/>
+  <mx:Script>
+    <![CDATA[
+      import mx.messaging.*;
+      import mx.messaging.channels.*;
+      import mx.rpc.events.*;
+      import mx.rpc.AbstractOperation;
+      import mx.rpc.soap.Operation;
+      import mx.rpc.soap.WebService;
+      import mx.controls.Alert;
+      import mx.logging.Log;
+      import mx.logging.ILogger;
+      import mx.utils.URLUtil;
 
-				<mx:HBox paddingTop="10" paddingBottom="10" paddingLeft="10" paddingRight="10" width="100%" height="100%">
-					<mx:VBox height="100%" width="100%">
-						
-						<!-- navigation -->
-						<mx:HBox width="100%"  height="40" verticalAlign="middle" horizontalAlign="left">
-							<mx:Button id="back" label="&lt;" fontWeight="bold" click="{browser.historyBack()}" toolTip="Back"/>
-							<mx:Button id="forward" label="&gt;" fontWeight="bold" click="{browser.historyForward()}" toolTip="Forward"/>
-							<mx:Button id="stop" label="X" click="browser.cancelLoad()" toolTip="Stop"/>
-							<mx:Button id="refresh" label="&#8634;" click="{browser.reload()}" toolTip="Refresh"/>
-							
-							<mx:TextInput id="addressbar" text="{browser_url}" height="22" enter="goToURL(addressbar.text)" width="100%"/>
-							<mx:Button id="go" label="Go" click="goToURL(addressbar.text)"/>
-						</mx:HBox>
-						
-						
-						<mx:TabNavigator width="100%" height="100%" creationPolicy="all">
-							<mx:Canvas label="Browser" width="100%" height="100%" borderStyle="none">
-								<!-- the browser -->
-								<mx:HTML id="browser" width="100%" height="100%" location="about:blank" complete="{windowStatus=''}"/>
-							</mx:Canvas>
-							<mx:Canvas label="View Source" width="100%" height="100%" borderStyle="none">
-								<!-- the source -->
-								<mx:TextArea id="sourcetab" height="100%" width="100%" text="" selectable="true" editable="false" borderStyle="none"/>
-							</mx:Canvas>
-						</mx:TabNavigator>
-						
-						<!-- control panel -->
-						<arc:CollapsiblePanel width="100%" height="220" layout="absolute" title="Proxy Configuration" minimize="{logo.visible=false}" restore="{logo.visible=true}">
-							<mx:Label x="10" y="12" text="Endpoint"/>
-							<mx:TextInput id="endpoint"    x="85" y="10"  width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{useProxy.selected}" toolTip="The URL of the AMF/HTTP Endpoint"/>
-							
-							<mx:Label x="10" y="42" text="Destination"/>
-							<mx:TextInput id="destination" x="85" y="40"  width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{useProxy.selected}" toolTip="The destination id (if blank, used the default endpoint)"/>
-							
-							<mx:Label x="10" y="72" text="Channel"/>
-							<mx:TextInput id="channel"     x="85" y="70"  width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{useProxy.selected}" toolTip="The channel id (if blank, uses the default channel)"/>
-							
-							<mx:Label x="10" y="102" text="WSDL URL"/>
-							<mx:TextInput id="wsdl"        x="85" y="100" width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{proxyType.text == 'SOAP'}" toolTip="The WSDL URL (required if no destination id defined)"/>
-							
-							<!-- Server.Proxy.Request.Failed: A destination that allows multiple domains or ports does not allow authentication.
-							<mx:Label x="10" y="102" text="Username"/>
-							<mx:TextInput id="username"    x="85" y="100" width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{useProxy.selected}"/>
-							
-							<mx:Label x="10" y="132" text="Password"/>
-							<mx:TextInput id="password"    x="85" y="130" width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{useProxy.selected}" displayAsPassword="true"/>
-							-->
-							
-							<mx:Label x="10" y="132" text="SOAP Action"/>
-							<mx:TextInput id="action"      x="85" y="130" width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{proxyType.text == 'SOAP'}" toolTip=""/>
-							
-							<mx:Label text="© 2010 - Marcin Wielgoszewski (Gotham Digital Science)" bottom="2" left="2"/>
-							
-							<mx:CheckBox id="useProxy"   x="427.95" y="10" label="Use Proxy?" selected="true" change="switchProxy()"/>
-							<mx:ComboBox id="proxyType"  x="427.95" y="40"  width="88.85" enabled="{useProxy.selected}" dataProvider="{proxyTypes}"  selectedIndex="0" toolTip="BlazeDS Service Type"></mx:ComboBox>
-							<mx:ComboBox id="msgType"    x="427.95" y="70"  width="88.85" enabled="{useProxy.selected}" dataProvider="{msgTypes}"    selectedIndex="0" toolTip="BlazeDS Message Format"></mx:ComboBox>
-							<mx:ComboBox id="httpMethod" x="427.95" y="100" width="88.85" enabled="{proxyType.text=='HTTP'}" dataProvider="{methodTypes}" selectedIndex="4" toolTip="HTTP Request Method"></mx:ComboBox>
-							<mx:Button   id="setProxy"   x="427.95" y="130" width="88.85" enabled="{useProxy.selected}" label="Set" click="{saveSettings(endpoint.text, destination.text, channel.text)}"/>
-							
-							<mx:VRule height="90%" y="5" x="544"/>
-							<mx:Image id="logo" source="@Embed('./gds_logo_2.png')" verticalCenter="0" right="0"/>
-						</arc:CollapsiblePanel>
-						
-					</mx:VBox>
-				</mx:HBox>
-	</mx:TitleWindow>
+      private static const log:ILogger = Log.getLogger("Blazentoo");
+
+      [Bindable]
+      private var proxyTypes:Array = ["HTTP", "SOAP"];
+
+      [Bindable]
+      private var msgTypes:Array = ["AMF", "AMFX"];
+
+      [Bindable]
+      private var methodTypes:Array = ["DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT", "TRACE"];
+
+      [Bindable]
+      private var browser_url:String = "";
+
+      [Bindable]
+      private var windowStatus:String = "";
+
+      [Bindable]
+      public var soap:WebService = new WebService();
+
+      public var so:SharedObject;
+
+      private function goToURL(address:String):void
+      {
+        browser_url = address;
+
+        if (useProxy.selected)
+        {
+          switch (proxyType.text)
+          {
+            case "HTTP":
+              http.url = browser_url;
+              http.method = httpMethod.text;
+              break;
+
+            case "SOAP":
+              soap.endpointURI = browser_url;
+              break;
+          }
+
+          log.info("Attempting to get " + browser_url);
+          windowStatus = "Loading " + browser_url;
+
+          switch (proxyType.text)
+          {
+            case "HTTP":
+              http.send();
+              break;
+
+            case "SOAP":
+              var nop:Boolean = false;
+
+              if (action.text == "" || action.text == null)
+              {
+                log.debug("Setting SOAPAction to ''");
+                nop = true;
+                var noOperation:mx.rpc.soap.Operation = new mx.rpc.soap.Operation(soap);
+              }
+              else
+              {
+                log.debug("Setting SOAPAction to " + action.text);
+                var operation:mx.rpc.AbstractOperation = soap.getOperation(action.text);
+              }
+
+              if (nop)
+              {
+                noOperation.send();
+              }
+              else
+              {
+                operation.send();
+              }
+              break;
+          }
+        }
+        else
+        {
+          browser.location = browser_url;
+        }
+      }
+
+
+      private function saveSettings(endpointUrl:String, destinationId:String, channelId:String):void
+      {
+        // Set up our channel set
+        var channelSet:ChannelSet = new ChannelSet();
+
+        switch (msgType.text)
+        {
+          case "AMF":
+            if (URLUtil.isHttpsURL(endpointUrl))
+            {
+              channelSet.addChannel(new SecureAMFChannel(channelId, endpointUrl));
+            }
+            else
+            {
+              channelSet.addChannel(new AMFChannel(channelId, endpointUrl));
+            }
+            break;
+
+          case "AMFX":
+            if (URLUtil.isHttpsURL(endpointUrl))
+            {
+              channelSet.addChannel(new SecureHTTPChannel(channelId, endpointUrl));
+            }
+            else
+            {
+              channelSet.addChannel(new HTTPChannel(channelId, endpointUrl));
+            }
+            break;
+        }
+
+        switch (proxyType.text)
+        {
+          case "HTTP":
+            http.destination = destinationId;
+            http.channelSet = channelSet;
+            break;
+
+          case "SOAP":
+            soap.destination = destinationId;
+            soap.channelSet = channelSet;
+
+            if (wsdl.text != null || wsdl.text != "")
+            {
+              soap.wsdl = wsdl.text;
+            }
+
+            soap.addEventListener("fault", handleFault);
+            soap.addEventListener("result", handleHTTPResponse);
+
+            soap.loadWSDL();
+
+            break;
+        }
+
+        // Uncomment the following to enable saving text input to LSO
+
+        /*
+        so = SharedObject.getLocal("settings");
+
+        so.data.endpoint = endpointUrl;
+        so.data.destination = destinationId;
+        so.data.channelId = channelId;
+        so.data.wsdl = wsdl.text;
+        so.data.action = action.text;
+        so.data.proxyType  = proxyType.selectedIndex;
+        so.data.msgType = msgType.selectedIndex;
+        so.data.httpMethod = httpMethod.selectedIndex;
+        */
+
+        windowStatus = "Proxy settings saved. Ready...";
+
+        log.info("Proxy settings saved");
+        log.debug("   endpoint    = " + endpointUrl);
+        log.debug("   destination = " + destinationId);
+        log.debug("   channel id  = " + channelId);
+        log.debug("   soap action = " + action.text);
+        log.debug("   proxy type  = " + proxyType.text);
+        log.debug("   format      = " + msgType.text);
+        log.debug(" Ready...");
+
+        addressbar.setFocus();
+      }
+
+
+      private function switchProxy():void
+      {
+        if (useProxy.selected)
+        {
+          log.debug("Using proxy");
+          browser.removeEventListener(Event.COMPLETE, updateBrowserUrlAndSource);
+          browser.addEventListener(Event.LOCATION_CHANGE, clickHandler);
+          proxyType.text == "HTTP" ? httpMethod.enabled = true: httpMethod.enabled = false;
+        }
+        else
+        {
+          log.debug("Not using proxy");
+          browser.removeEventListener(Event.LOCATION_CHANGE, clickHandler);
+          browser.addEventListener(Event.COMPLETE, updateBrowserUrlAndSource);
+          action.enabled = false;
+          httpMethod.enabled = false;
+        }
+      }
+
+
+      private function updateBrowserUrlAndSource(event:Event):void
+      {
+        addressbar.text = browser.location;
+        //sourcetab.text = browser.data.toString();
+      }
+
+
+      private function clickHandler(event:Event):void
+      {
+        log.debug(event.currentTarget.id + ": " + event.eventPhase);
+        if (useProxy.selected)
+        {
+          var tmp_url:String = event.target.location.toString();
+
+          if (tmp_url.charAt(0) == "/")
+          {
+            http.url = URLUtil.getFullURL(browser_url, tmp_url);
+          }
+
+          else if (tmp_url.substr(0, 7) == "http://" || tmp_url.substr(0, 8) == "https://")
+          {
+            http.url = URLUtil.getFullURL(browser_url, tmp_url);
+          }
+
+          else
+          {
+            http.url = browser_url.substr(0, browser_url.lastIndexOf("/")) + "/" + tmp_url;
+          }
+
+          if (http.url.indexOf("about:blank") == -1)
+          {
+            log.info("Attempting to get " + http.url);
+            windowStatus = "Loading " + http.url;
+            http.send();
+          }
+        }
+      }
+
+
+      public function handleHTTPResponse(event:ResultEvent):void
+      {
+        log.debug(event.message.toString());
+        var response:String = event.message.body.toString();
+        sourcetab.text = response;
+        browser.data = response;
+        browser_url = http.url;
+      }
+
+      public function handleSOAPResponse(event:FaultEvent):void
+      {
+        log.debug(event.message.toString());
+        var response:String = event.message.body.toString();
+        browser.data = response;
+        sourcetab.text = response;
+        browser_url = soap.endpointURI;
+
+      }
+
+      public function handleFault(event:FaultEvent):void
+      {
+        var error:String = "";
+
+        if (event.fault.faultDetail != event.fault.faultString)
+        {
+          error = event.fault.faultCode + ": " + event.fault.faultString + "(" + event.fault.faultDetail + ")";
+        }
+        else
+        {
+          error = event.fault.faultCode + ": " + event.fault.faultString;
+        }
+
+        log.error("[" + event.target + "] " + event.fault.toString());
+
+        // If this is a SOAP, we still probably want to load the results into
+        // the browser, since a normal web page is not going to be valid xml.
+        if (proxyType.text == "SOAP")
+        {
+          switch (event.fault.faultCode)
+          {
+            case "Client.NoSuchMethod":
+              Alert.show(event.fault.faultString.toString(), "No such method");
+              break;
+
+            case "Client.WSDL":
+              Alert.show(event.fault.faultString.toString(), "No WSDL defined");
+              break;
+
+            case "Server.Proxy.Request.Failed":
+              Alert.show(event.fault.faultString.toString() +". "+ event.fault.faultDetail.toString(), "Unable to load WSDL");
+              break;
+
+            default:
+              handleSOAPResponse(event);
+          }
+        }
+        else
+        {
+          Alert.show(error);
+        }
+      }
+
+      public function initApp():void
+      {
+        log.info("(C) 2010 - Marcin Wielgoszewski (Gotham Digital Science)");
+        log.info("GDS BlazeDS Proxy Tool initialized");
+
+        // Uncomment the following to enable loading text input from LSO
+
+        /*
+        so = SharedObject.getLocal("settings");
+
+        endpoint.text = so.data.endpoint;
+        destination.text = so.data.destination;
+        channel.text = so.data.channel;
+        wsdl.text = so.data.wsdl;
+        action.text = so.data.action;
+
+        so.data.proxyType  != null ? proxyType.selectedIndex  = so.data.proxyType  : proxyType.selectedIndex  = 0;
+        so.data.msgType    != null ? msgType.selectedIndex    = so.data.msgType    : msgType.selectedIndex    = 0;
+        so.data.httpMethod != null ? httpMethod.selectedIndex = so.data.httpMethod : httpMethod.selectedIndex = 4;
+
+        saveSettings(endpoint.text, destination.text, channel.text);
+        */
+
+        browser.data = "";
+        switchProxy();
+      }
+
+    ]]>
+  </mx:Script>
+
+  <mx:HTTPService
+    id="http"
+    useProxy="true"
+    resultFormat="text"
+    result="handleHTTPResponse(event)"
+    fault="handleFault(event)"
+    />
+
+  <mx:TitleWindow x="0" y="0" width="100%" height="100%" layout="absolute" title="BlazeDS Proxy Browser">
+    <mx:HBox paddingTop="10" paddingBottom="10" paddingLeft="10" paddingRight="10" width="100%" height="100%">
+      <mx:VBox height="100%" width="100%">
+
+        <!-- navigation -->
+        <mx:HBox width="100%"  height="40" verticalAlign="middle" horizontalAlign="left">
+          <mx:Button id="back" label="&lt;" fontWeight="bold" click="{browser.historyBack()}" toolTip="Back"/>
+          <mx:Button id="forward" label="&gt;" fontWeight="bold" click="{browser.historyForward()}" toolTip="Forward"/>
+          <mx:Button id="stop" label="X" click="browser.cancelLoad()" toolTip="Stop"/>
+          <mx:Button id="refresh" label="&#8634;" click="{browser.reload()}" toolTip="Refresh"/>
+
+          <mx:TextInput id="addressbar" text="{browser_url}" height="22" enter="goToURL(addressbar.text)" width="100%"/>
+          <mx:Button id="go" label="Go" click="goToURL(addressbar.text)"/>
+        </mx:HBox>
+
+
+        <!-- browser canvas -->
+        <mx:TabNavigator width="100%" height="100%" creationPolicy="all">
+          <mx:Canvas label="Browser" width="100%" height="100%" borderStyle="none">
+            <!-- the browser -->
+            <mx:HTML id="browser" width="100%" height="100%" location="about:blank" complete="{windowStatus=''}"/>
+          </mx:Canvas>
+          <mx:Canvas label="View Source" width="100%" height="100%" borderStyle="none">
+            <!-- the source -->
+            <mx:TextArea id="sourcetab" height="100%" width="100%" text="" selectable="true" editable="false" borderStyle="none"/>
+          </mx:Canvas>
+        </mx:TabNavigator>
+
+        <!-- control panel -->
+        <arc:CollapsiblePanel width="100%" height="220" layout="absolute" title="Proxy Configuration" minimize="{logo.visible=false}" restore="{logo.visible=true}">
+          <mx:Label x="10" y="12" text="Endpoint"/>
+          <mx:TextInput id="endpoint" x="85" y="10" width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{useProxy.selected}" toolTip="The URL of the AMF/HTTP Endpoint"/>
+
+          <mx:Label x="10" y="42" text="Destination"/>
+          <mx:TextInput id="destination" x="85" y="40" width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{useProxy.selected}" toolTip="The destination id (if blank, used the default endpoint)"/>
+
+          <mx:Label x="10" y="72" text="Channel"/>
+          <mx:TextInput id="channel" x="85" y="70" width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{useProxy.selected}" toolTip="The channel id (if blank, uses the default channel)"/>
+
+          <mx:Label x="10" y="102" text="WSDL URL"/>
+          <mx:TextInput id="wsdl" x="85" y="100" width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{proxyType.text == 'SOAP'}" toolTip="The WSDL URL (required if no destination id defined)"/>
+
+          <!-- Server.Proxy.Request.Failed: A destination that allows multiple domains or ports does not allow authentication.
+          <mx:Label x="10" y="102" text="Username"/>
+          <mx:TextInput id="username"    x="85" y="100" width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{useProxy.selected}"/>
+
+          <mx:Label x="10" y="132" text="Password"/>
+          <mx:TextInput id="password"    x="85" y="130" width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{useProxy.selected}" displayAsPassword="true"/>
+          -->
+
+          <mx:Label x="10" y="132" text="SOAP Action"/>
+          <mx:TextInput id="action" x="85" y="130" width="335" text="" enter="{saveSettings(endpoint.text, destination.text, channel.text)}" enabled="{proxyType.text == 'SOAP'}" toolTip=""/>
+
+          <mx:Label text="© 2010 - Marcin Wielgoszewski (Gotham Digital Science)" bottom="2" left="2"/>
+
+          <mx:CheckBox id="useProxy" x="427.95" y="10" label="Use Proxy?" selected="true" change="switchProxy()"/>
+          <mx:ComboBox id="proxyType" x="427.95" y="40" width="88.85" enabled="{useProxy.selected}" dataProvider="{proxyTypes}"  selectedIndex="0" toolTip="BlazeDS Service Type"/>
+          <mx:ComboBox id="msgType" x="427.95" y="70" width="88.85" enabled="{useProxy.selected}" dataProvider="{msgTypes}"    selectedIndex="0" toolTip="BlazeDS Message Format"/>
+          <mx:ComboBox id="httpMethod" x="427.95" y="100" width="88.85" enabled="{proxyType.text=='HTTP'}" dataProvider="{methodTypes}" selectedIndex="4" toolTip="HTTP Request Method"/>
+          <mx:Button   id="setProxy" x="427.95" y="130" width="88.85" enabled="{useProxy.selected}" label="Set" click="{saveSettings(endpoint.text, destination.text, channel.text)}"/>
+
+          <mx:VRule height="90%" y="5" x="544"/>
+          <mx:Image id="logo" source="@Embed('./gds_logo_2.png')" verticalCenter="0" right="0"/>
+        </arc:CollapsiblePanel>
+
+      </mx:VBox>
+    </mx:HBox>
+  </mx:TitleWindow>
 </mx:WindowedApplication>
